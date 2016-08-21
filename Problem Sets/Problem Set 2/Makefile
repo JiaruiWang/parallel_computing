@@ -5,7 +5,7 @@ NVCC=nvcc
 # locations on most linux distros #
 ###################################
 
-OPENCV_LIBPATH=/usr/lib
+OPENCV_LIBPATH=/usr/lib64
 OPENCV_INCLUDEPATH=/usr/include
 
 ###################################################
@@ -16,7 +16,10 @@ OPENCV_INCLUDEPATH=/usr/include
 #OPENCV_INCLUDEPATH=/usr/local/include
 
 OPENCV_LIBS=-lopencv_core -lopencv_imgproc -lopencv_highgui
-CUDA_INCLUDEPATH=/usr/local/cuda-5.0/include
+
+CUDA_INCLUDEPATH=/opt/cuda/include
+CUDA_LIBPATH=/opt/cuda/lib64
+CUDA_LIBDEVICPATH=/opt/cuda/nvvm/libdevice --dont-use-profile
 
 ######################################################
 # On Macs the default install locations are below    #
@@ -30,13 +33,13 @@ NVCC_OPTS=-O3 -arch=sm_20 -Xcompiler -Wall -Xcompiler -Wextra -m64
 GCC_OPTS=-O3 -Wall -Wextra -m64
 
 student: main.o student_func.o compare.o reference_calc.o Makefile
-	$(NVCC) -o HW2 main.o student_func.o compare.o reference_calc.o -L $(OPENCV_LIBPATH) $(OPENCV_LIBS) $(NVCC_OPTS)
+	$(NVCC) -o HW2 main.o student_func.o compare.o reference_calc.o -L $(OPENCV_LIBPATH) $(OPENCV_LIBS) $(NVCC_OPTS)  -I $(CUDA_INCLUDEPATH) -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
 
 main.o: main.cpp timer.h utils.h HW2.cpp
 	g++ -c main.cpp $(GCC_OPTS) -I $(OPENCV_INCLUDEPATH) -I $(CUDA_INCLUDEPATH)
 
 student_func.o: student_func.cu reference_calc.cpp utils.h
-	nvcc -c student_func.cu $(NVCC_OPTS)
+	nvcc -c student_func.cu $(NVCC_OPTS)  -I $(CUDA_INCLUDEPATH) -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
 
 compare.o: compare.cpp compare.h
 	g++ -c compare.cpp -I $(OPENCV_INCLUDEPATH) $(GCC_OPTS) -I $(CUDA_INCLUDEPATH)

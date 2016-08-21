@@ -1,0 +1,4 @@
+setenv PATH ${PATH}:/opt/cuda/bin
+setenv PATH ${PATH}:/opt/cuda/nvvm/bin
+nvcc ~/parallel_computing/a.cu -I/opt/cuda/include -ldir /opt/cuda/nvvm/libdevice -L /opt/cuda/lib64
+--dont-use-profile

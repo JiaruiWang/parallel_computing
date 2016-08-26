@@ -80,6 +80,184 @@
 */
 
 #include "utils.h"
+#include <stdio.h>
+
+__global__ void shared_mem_max_reduce_kernel(const float* const d_in,
+                                             float* d_out_max,
+                                             int total)
+{
+  int index = blockDim.x * blockIdx.x + threadIdx.x;
+  int tid = threadIdx.x;
+  if (index >= total)
+  {
+    return;
+  }
+  extern __shared__ float s_max[];
+  s_max[tid] = d_in[index];
+  __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s>>=1)
+  {
+    if (tid < s)
+    {
+      if (s_max[tid] < s_max[tid+s])
+      {
+        s_max[tid] = s_max[tid + s];
+      }
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0)
+  {
+    d_out_max[blockIdx.x] = s_max[0];
+    // printf(" @Max = %f", s_max[0]);
+  }
+}
+
+__global__ void shared_mem_min_reduce_kernel(const float* const d_in,
+                                             float* d_out_min,
+                                             int total)
+{
+  int index = blockDim.x * blockIdx.x + threadIdx.x;
+  int tid = threadIdx.x;
+  if (index >= total)
+  {
+    return;
+  }
+  extern __shared__ float s_min[];
+  s_min[tid] = d_in[index];
+  __syncthreads();
+  for (int s = blockDim.x/2; s > 0; s>>=1)
+  {
+    if (tid < s)
+    {
+      if (s_min[tid] > s_min[tid+s])
+      {
+        s_min[tid] = s_min[tid + s];
+      }
+  
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0)
+  {
+    d_out_min[blockIdx.x] = s_min[0];
+    // printf(" min = %f", &s_min[0]);
+  }
+}
+
+void reduce(float* d_in,
+            float* d_out_min_inter,
+            float* d_out_max_inter,
+            float* d_out_min,
+            float* d_out_max,
+            float &min_logLum,
+            float &max_logLum,
+            int numRows,
+            int numCols)
+{
+  int pixels = numCols*numRows;
+  int threads = 1024;
+  int blocks = ceil(1.0*pixels/threads);
+
+
+
+  shared_mem_max_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_max_inter, pixels);
+  shared_mem_min_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_min_inter, pixels);
+  threads = blocks;
+  blocks = 1;
+
+  shared_mem_max_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_out_max_inter, d_out_max, threads);
+  shared_mem_min_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_out_min_inter, d_out_min, threads);
+  
+  checkCudaErrors(cudaMemcpy(&max_logLum, d_out_max, sizeof(float), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaMemcpy(&min_logLum, d_out_min, sizeof(float), cudaMemcpyDeviceToHost));
+  // printf(" @Max = %f", max_logLum);
+  // printf(" min = %f", min_logLum);
+
+}
+
+__global__ void histogram_kernel(const float* const d_logLuminance,
+                                 unsigned int*  bin_out,
+                                 const float min_logLum,
+                                 const float range_logLum,
+                                 const size_t numRows,
+                                 const size_t numCols,
+                                 const size_t numBins)
+{
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= numCols * numRows) return;
+
+  unsigned int bin = (int)((d_logLuminance[index] - min_logLum) / range_logLum * numBins);
+  if (bin >= numBins)
+  {
+    bin = numBins -1;
+  }
+  atomicAdd(&(bin_out[bin]), 1);
+}
+
+__global__ void exclusive_scan_kernel(unsigned int* bin,
+                                 const size_t numBins)
+{
+  extern __shared__ unsigned int sh_bin[];
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if( index >= numBins) return;
+  sh_bin[index] = bin[index];
+  __syncthreads();
+  int sum = 0;
+  for (int i = 1; i <= index; ++i)
+  {
+    sum += sh_bin[i-1];
+  }
+  __syncthreads();
+  sh_bin[index] = sum;
+  __syncthreads();
+  bin[index] = sh_bin[index];
+  // for (int i = 2; i <= numBins; i *= 2)
+  // {
+  //   if ((index+1)%i == 0)
+  //   {
+  //     sh_bin[index] = sh_bin[index] + sh_bin[index - i/2];
+  //   }
+  //   __syncthreads();
+  // }
+  // __syncthreads();
+  // if (index == numBins-1)
+  // {
+  //   printf("\n------------sh_bin[%d] = %u-----------\n", index,sh_bin[index]);
+  //   for (int i = 0; i <= index; ++i)
+  //   {
+  //     printf("%u ", sh_bin[i]);
+  //   }
+  //   sh_bin[numBins-1] = 0;
+  // }
+  // __syncthreads();
+  // 
+  // for (int i = numBins; i >=2; i = i/2)
+  // {
+  //   if ((index + 1) % i == 0)
+  //   {
+  //     int temp = sh_bin[index];
+  //     int temp2 =sh_bin[index - i/2] + sh_bin[index];
+  //     __syncthreads();
+  //     sh_bin[index] = temp2;
+  //     sh_bin[index - i/2] = temp;
+  //   }
+  //   __syncthreads();
+  // }
+  // __syncthreads();
+  // if (index == numBins-1)
+  // {
+  //   printf("\n-------------sh_bin[%d] = %u-----------\n", index,sh_bin[index]);
+  //   for (int i = 0; i <= index; ++i)
+  //   {
+  //     printf("%u ", sh_bin[i]);
+  //   }
+  // }
+  // __syncthreads();
+  // bin[index] = sh_bin[index];
+}
 
 void your_histogram_and_prefixsum(const float* const d_logLuminance,
                                   unsigned int* const d_cdf,
@@ -99,6 +277,67 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
     4) Perform an exclusive scan (prefix sum) on the histogram to get
        the cumulative distribution of luminance values (this should go in the
        incoming d_cdf pointer which already has been allocated for you)       */
+  int pixels = numCols*numRows;
+  int ARRAY_BYTES = pixels * sizeof(float);
+  float* d_in;
+  float* d_out_min_inter;
+  float* d_out_max_inter;
+  float* d_out_max;
+  float* d_out_min;
+  checkCudaErrors(cudaMalloc(&d_in, ARRAY_BYTES));
+  checkCudaErrors(cudaMalloc(&d_out_min_inter, ARRAY_BYTES));
+  checkCudaErrors(cudaMalloc(&d_out_max_inter, ARRAY_BYTES));
+  checkCudaErrors(cudaMalloc(&d_out_min, sizeof(float)));
+  checkCudaErrors(cudaMalloc(&d_out_max, sizeof(float)));
+  checkCudaErrors(cudaMemcpy(d_in, d_logLuminance, ARRAY_BYTES, cudaMemcpyDeviceToDevice));
+  // float* h_in;
+  // h_in = (float*)malloc(ARRAY_BYTES);
+  // checkCudaErrors(cudaMemcpy(h_in, d_in, ARRAY_BYTES, cudaMemcpyDeviceToHost));
+  // float max = 1.f;
+  // float min = 0.f;
+  // for (int i = 0; i < pixels; ++i)
+  // {
+  //   if(h_in[i] < min) min = h_in[i];
+  //   if(h_in[i] > max) max = h_in[i];
+  // }
+  // printf("\n\n max = %f min = %f \n\n", max, min);
+  reduce(d_in, d_out_min_inter, d_out_max_inter, d_out_min, d_out_max, min_logLum, max_logLum, numRows, numCols);
+  checkCudaErrors(cudaFree(d_out_min_inter));
+  checkCudaErrors(cudaFree(d_out_max_inter));
+  checkCudaErrors(cudaFree(d_out_min));
+  checkCudaErrors(cudaFree(d_out_max));
+
+  float range_logLum = max_logLum - min_logLum;
+
+  int threads = 1024;
+  int blocks = ceil(1.0*pixels/threads);
+  unsigned int* bin;
+  checkCudaErrors(cudaMalloc(&bin, sizeof(unsigned int) * numBins));
+  histogram_kernel<<<blocks, threads>>>(d_logLuminance, bin, min_logLum, range_logLum, numRows, numCols, numBins);
+  unsigned int* h_bin;
+  h_bin = (unsigned int*)malloc(sizeof(unsigned int) * numBins);
+  checkCudaErrors(cudaMemcpy(h_bin, bin, sizeof(int) * numBins, cudaMemcpyDeviceToHost));
+  unsigned int sum = 0;
+  for (unsigned int i = 0; i < numBins; ++i)
+  {
+    printf("%u ", h_bin[i]);
+    sum += h_bin[i];
+  }
+
+  exclusive_scan_kernel<<<1, numBins, numBins * sizeof(unsigned int)>>>(bin, numBins);
+
+  checkCudaErrors(cudaMemcpy(h_bin, bin, sizeof(unsigned int) * numBins, cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemcpy(d_cdf, h_bin, sizeof(unsigned int) * numBins, cudaMemcpyHostToDevice));
+
+    printf("\n---------- sum = %u------product = %d----------\n ", sum, numCols*numRows);
+
+  for (unsigned int i = 0; i < numBins; ++i)
+  {
+    printf("%u ", h_bin[i]);
+  }
+
+  checkCudaErrors(cudaFree(bin));
+  checkCudaErrors(cudaFree(d_in));
 
 
 }

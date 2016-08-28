@@ -161,10 +161,9 @@ void reduce(float* d_in,
   int threads = 1024;
   int blocks = ceil(1.0*pixels/threads);
 
-
-
   shared_mem_max_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_max_inter, pixels);
   shared_mem_min_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_min_inter, pixels);
+  
   threads = blocks;
   blocks = 1;
 
@@ -173,9 +172,6 @@ void reduce(float* d_in,
   
   checkCudaErrors(cudaMemcpy(&max_logLum, d_out_max, sizeof(float), cudaMemcpyDeviceToHost));
   checkCudaErrors(cudaMemcpy(&min_logLum, d_out_min, sizeof(float), cudaMemcpyDeviceToHost));
-  // printf(" @Max = %f", max_logLum);
-  // printf(" min = %f", min_logLum);
-
 }
 
 __global__ void histogram_kernel(const float* const d_logLuminance,
@@ -190,6 +186,8 @@ __global__ void histogram_kernel(const float* const d_logLuminance,
   if (index >= numCols * numRows) return;
 
   unsigned int bin = (int)((d_logLuminance[index] - min_logLum) / range_logLum * numBins);
+
+  //simple atomic Add implementation
   if (bin >= numBins)
   {
     bin = numBins -1;
@@ -205,6 +203,7 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
   if( index >= numBins) return;
   sh_bin[index] = bin[index];
   __syncthreads();
+  // simple scan implementation
   // int sum = 0;
   // for (int i = 1; i <= index; ++i)
   // {
@@ -214,6 +213,8 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
   // sh_bin[index] = sum;
   // __syncthreads();
   // bin[index] = sh_bin[index];
+  
+  // blelloch scan
   for (int i = 2; i <= numBins; i *= 2)
   {
     if ((index+1)%i == 0)
@@ -224,102 +225,28 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
       
     }
     __syncthreads();
-
-    // if (index == numBins-512-1 && i/2 < index)
-    // {
-    //   printf("\n-------\n---i = %d-----------------\n---bin[%d] = %u ---\n---bin[%d] = %u ---\n----------------",i, index - i/2, sh_bin[index - i/2], index , sh_bin[index]);
-    // }
-    // __syncthreads();
-
-    // if (index == numBins-1)
-    // {
-    //  printf("\n------\n--i = %d ------------------\n---bin[%d] = %u ---\n---bin[%d] = %u ---\n----------------",i, index - i/2, sh_bin[index - i/2], index , sh_bin[index]);
-    // }
-    // __syncthreads();
-
-    // if ( i >= 256 && i <= 1024 && index == numBins-1)
-    // {
-    //   printf("\n----- i = %d ----\n---sh_bin[%d] = %u-----------\n", i,index,sh_bin[index]);
-    //   for (int i = 0; i <= index; ++i)
-    //   {
-    //     printf(" \t%d:%u ", i, sh_bin[i]);
-    //   }
-    // }
-    // __syncthreads();
-
   }
-  
-  __syncthreads();
-    if (index == numBins-1)
-    {
-      printf("\n-----before bin[1023] = 0 --------\n");
-      for (int i = 0; i <= index; ++i)
-      {
- //       printf(" \t%d:%u ", i, sh_bin[i]);
-      }
-     sh_bin[numBins-1] = 0;
-    }
-    __syncthreads();
 
-        if (index == numBins-1)
-    {
-      printf("\n----after bin[1023] = 0----\n");
-      for (int i = 0; i <= index; ++i)
-      {
-        printf(" \t%d:%u ", i, sh_bin[i]);
-      }
-    }
-    __syncthreads();
-  
- //  printf("\n----unsigned int bytes = %d---\n", sizeof(unsigned int));
-  //   sh_bin[numBins-1] = 0;
-  //   __syncthreads();
+  if (index == numBins-1)
+  {
+   sh_bin[numBins-1] = 0;
+  }
+  __syncthreads();
+
   for (int i = numBins; i >= 2; i = i/2)
   {
-    __syncthreads();
     if ((index + 1) % i == 0)
     {
       int temp = sh_bin[index];
       int temp2 =sh_bin[index - i/2];
       sh_bin[index - i/2] = temp;
-      // printf("\n-----sh_bin[%d] = %u------\n", index - i/2,  sh_bin[index - i/2]);
       sh_bin[index] = temp + temp2;
     }
     __syncthreads();
-
-    if (index == numBins-1)
-    {
-      printf("\n----- i = %d ----\n----sh_bin[%d] = %u------\n----sh_bin[%d] = %u-----------\n",i, index - i/2,  sh_bin[index - i/2], index,sh_bin[index]);
-      for (int i = 0; i <= index; ++i)
-      {
-        printf("\t%d:%u ", i,sh_bin[i]);
-      }
-    }
-    __syncthreads();
   }
-__syncthreads();
-
-
-    // if (index == numBins-1)
-    // {
-    //   // printf("\n--------\n----sh_bin[%d] = %u-----------\n", index,sh_bin[index]);
-    //   for (int i = 0; i <= index; ++i)
-    //   {
-    //     // printf("\t%d:%u ", i,sh_bin[i]);
-    //   }
-    // }
-    // __syncthreads();
   bin[index] = sh_bin[index];
+
   __syncthreads();
-    // if (index == 0)
-    // {
-    //   // printf("\n---------\n----bin[%d] = %u-----------\n", index,bin[index]);
-    //   for (int i = 0; i < numBins; ++i)
-    //   {
-    //     // printf("\t%d:%u ", i,bin[i]);
-    //   }
-    // }
-    __syncthreads();
 }
 
 void your_histogram_and_prefixsum(const float* const d_logLuminance,
@@ -353,17 +280,7 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
   checkCudaErrors(cudaMalloc(&d_out_min, sizeof(float)));
   checkCudaErrors(cudaMalloc(&d_out_max, sizeof(float)));
   checkCudaErrors(cudaMemcpy(d_in, d_logLuminance, ARRAY_BYTES, cudaMemcpyDeviceToDevice));
-  // float* h_in;
-  // h_in = (float*)malloc(ARRAY_BYTES);
-  // checkCudaErrors(cudaMemcpy(h_in, d_in, ARRAY_BYTES, cudaMemcpyDeviceToHost));
-  // float max = 1.f;
-  // float min = 0.f;
-  // for (int i = 0; i < pixels; ++i)
-  // {
-  //   if(h_in[i] < min) min = h_in[i];
-  //   if(h_in[i] > max) max = h_in[i];
-  // }
-  // printf("\n\n max = %f min = %f \n\n", max, min);
+
   reduce(d_in, d_out_min_inter, d_out_max_inter, d_out_min, d_out_max, min_logLum, max_logLum, numRows, numCols);
 
   cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
@@ -383,30 +300,12 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
 
   cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
-  unsigned int* h_bin;
-  h_bin = (unsigned int*)malloc(sizeof(unsigned int) * numBins);
-  checkCudaErrors(cudaMemcpy(h_bin, bin, sizeof(int) * numBins, cudaMemcpyDeviceToHost));
-  unsigned int sum = 0;
-  for (unsigned int i = 0; i < numBins; ++i)
-  {
-    // printf("\t%d:%u ", i,h_bin[i]);
-    sum += h_bin[i];
-  }
-  printf("---------kernel begins------------\n");
   exclusive_scan_kernel<<<1, numBins, numBins * sizeof(unsigned int)>>>(bin, numBins);
 
   cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
-  checkCudaErrors(cudaMemcpy(h_bin, bin, sizeof(unsigned int) * numBins, cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemcpy(d_cdf, h_bin, sizeof(unsigned int) * numBins, cudaMemcpyHostToDevice));
+  checkCudaErrors(cudaMemcpy(d_cdf, bin, sizeof(unsigned int) * numBins, cudaMemcpyDeviceToDevice));
 
-    printf("\n---------- sum = %u------product = %d----------\n ", sum, numCols*numRows);
-
-  for (unsigned int i = 0; i < numBins; ++i)
-  {
-    // printf("\t%d:%u ",i, h_bin[i]);
-  }
-  printf("\n----unsigned int bytes = %d---\n", sizeof(unsigned int));
   checkCudaErrors(cudaFree(bin));
   checkCudaErrors(cudaFree(d_in));
 

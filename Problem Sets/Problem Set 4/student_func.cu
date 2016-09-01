@@ -41,7 +41,28 @@
    at the end.
 
  */
+__global__ void histogram_kernel(unsigned int* const d_inputVals,
+                                 unsigned int* const d_inputPos,
+                                 unsigned int* const d_digits,
+                                  int* const d_histogram,
+                                 int digit,
+                                 int numElems)
+{
+  int index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (index >= numElems) return;
 
+  d_digits[index] = d_inputVals[index] & digit;
+  int bin = d_digits[index];
+   int step = 1;
+  atomicAdd(&(d_histogram[bin]), step);
+
+  if (index == 0)
+  {
+    printf("numElems = %d\n", numElems);
+    printf("d_digits[%d] = %d\n", index, d_digits[index]);
+    printf("hist : 0 = %d, 1 = %d\n", d_histogram[0], d_histogram[1]);
+  }
+}
 
 void your_sort(unsigned int* const d_inputVals,
                unsigned int* const d_inputPos,
@@ -51,4 +72,16 @@ void your_sort(unsigned int* const d_inputVals,
 { 
   //TODO
   //PUT YOUR SORT HERE
+  int threads = 1024;
+  int blocks = ceil(1.0 * numElems/ threads);
+
+  unsigned int* d_digits;
+   int * d_histogram;
+  checkCudaErrors(cudaMalloc(&d_digits, sizeof(unsigned int) * numElems));
+  checkCudaErrors(cudaMalloc(&d_histogram, sizeof( int) * 2));
+  checkCudaErrors(cudaMemset(d_histogram, 0, sizeof( int) * 2));
+
+  histogram_kernel<<<blocks, threads>>>(d_inputVals, d_inputPos, d_digits, d_histogram, 0x1, numElems);
+  
+
 }

@@ -44,7 +44,7 @@
 __global__ void histogram_kernel(unsigned int* const d_inputVals,
                                  unsigned int* const d_inputPos,
                                  unsigned int* const d_digits,
-                                  int* const d_histogram,
+                                 unsigned int* const d_histogram,
                                  int digit,
                                  int numElems)
 {
@@ -64,6 +64,17 @@ __global__ void histogram_kernel(unsigned int* const d_inputVals,
   }
 }
 
+__global__ void prefix_sum_kernel(unsigned int* d_histogram
+                                  unsigned int* d_prefix_sum)
+{
+  if (blockDim.x * blockIdx.x + threadIdx.x == 1)
+  {  
+    d_prefix_sum[1] = d_histogram[0];
+    printf("d_prefix_sum[1] = %d\n", d_prefix_sum[1]);
+  }
+
+}
+
 void your_sort(unsigned int* const d_inputVals,
                unsigned int* const d_inputPos,
                unsigned int* const d_outputVals,
@@ -76,12 +87,17 @@ void your_sort(unsigned int* const d_inputVals,
   int blocks = ceil(1.0 * numElems/ threads);
 
   unsigned int* d_digits;
-   int * d_histogram;
+  unsigned int* d_histogram;
+  unsigned int* d_prefix_sum;
   checkCudaErrors(cudaMalloc(&d_digits, sizeof(unsigned int) * numElems));
   checkCudaErrors(cudaMalloc(&d_histogram, sizeof( int) * 2));
+  checkCudaErrors(cudaMalloc(&d_prefix_sum, sizeof( int) * 2));
   checkCudaErrors(cudaMemset(d_histogram, 0, sizeof( int) * 2));
+  checkCudaErrors(cudaMemset(d_prefix_sum, 0, sizeof( int) * 2));
 
   histogram_kernel<<<blocks, threads>>>(d_inputVals, d_inputPos, d_digits, d_histogram, 0x1, numElems);
-  
+  prefix_sum_kernel<<<blocks, threads>>>(d_histogram, d_prefix_sum);
+  checkCudaErrors(cudaFree(d_digits));
+  checkCudaErrors(cudaFree(d_histogram));
 
 }

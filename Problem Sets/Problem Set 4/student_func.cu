@@ -73,66 +73,72 @@ __global__ void relative_exclusive_scan(unsigned int* const d_inputVals,
                                         unsigned int* d_prefix_sum,
                                         const size_t numElems)
 {
-  unsigned int index = blockDim.x * blockIdx.x + threadIdx;
+  unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
   if (index >= numElems) return;
 
-  unsigned int bin = d_inputVals[index] & 1;
+  //unsigned int bin = d_inputVals[index] & 1;
   
 
 }
 
-__global__ void exclusive_scan_kernel(unsigned int* bin,
-                                 const size_t numBins)
+__global__ void exclusive_scan_kernel(unsigned int* d_digits,
+                                      unsigned int* d_digits_pos,
+                                      const size_t numElems)
 {
-  extern __shared__ unsigned int sh_bin[];
   int index = blockIdx.x * blockDim.x + threadIdx.x;
-  if( index >= numBins) return;
-  sh_bin[index] = bin[index];
-  __syncthreads();
+  if( index >= numElems) return;
+
   // simple scan implementation
-  // int sum = 0;
-  // for (int i = 1; i <= index; ++i)
-  // {
-  //   sum += sh_bin[i-1];
-  // }
-  // __syncthreads();
-  // sh_bin[index] = sum;
-  // __syncthreads();
-  // bin[index] = sh_bin[index];
+  int sum = 0;
+  for (int i = 1; i <= index; ++i)
+  {
+    sum += d_digits[i-1];
+  }
+  __syncthreads();
+  d_digits_pos[index] = sum;
+  __syncthreads();
+
+  if (index == 0)
+  {
+    for (unsigned int i = 0; i < numElems; ++i)
+    {
+      printf("%u:%u ", i, d_digits_pos[i]);
+    }
+  }
   
   // blelloch scan
-  for (int i = 2; i <= numBins; i *= 2)
-  {
-    if ((index+1)%i == 0)
-    {
-      int temp = sh_bin[index];
-      int temp2 = sh_bin[index - i/2];
-      sh_bin[index] = temp + temp2;
+  // for (int i = 2; i <= numBins; i *= 2)
+  // {
+  //   if ((index+1)%i == 0)
+  //   {
+  //     int temp = sh_bin[index];
+  //     int temp2 = sh_bin[index - i/2];
+  //     sh_bin[index] = temp + temp2;
       
-    }
-    __syncthreads();
-  }
+  //   }
+  //   __syncthreads();
+  // }
 
-  if (index == numBins-1)
-  {
-   sh_bin[numBins-1] = 0;
-  }
-  __syncthreads();
+  // if (index == numBins-1)
+  // {
+  //  sh_bin[numBins-1] = 0;
+  // }
+  // __syncthreads();
 
-  for (int i = numBins; i >= 2; i = i/2)
-  {
-    if ((index + 1) % i == 0)
-    {
-      int temp = sh_bin[index];
-      int temp2 =sh_bin[index - i/2];
-      sh_bin[index - i/2] = temp;
-      sh_bin[index] = temp + temp2;
-    }
-    __syncthreads();
-  }
-  bin[index] = sh_bin[index];
+  // for (int i = numBins; i >= 2; i = i/2)
+  // {
+  //   if ((index + 1) % i == 0)
+  //   {
+  //     int temp = sh_bin[index];
+  //     int temp2 =sh_bin[index - i/2];
+  //     sh_bin[index - i/2] = temp;
+  //     sh_bin[index] = temp + temp2;
+  //   }
+  //   __syncthreads();
+  // }
+  // bin[index] = sh_bin[index];
 
-  __syncthreads();
+  // __syncthreads();
 }
 
 
@@ -167,6 +173,9 @@ void your_sort(unsigned int* const d_inputVals,
   printf("d_prefix_sum[0]= %d, d_prefix_sum[1] = %d\n", h_prefix_sum[0], h_prefix_sum[1]);
 
   // 3)
+  unsigned int* d_digits_pos;
+  checkCudaErrors(cudaMalloc(&d_digits_pos, sizeof(unsigned int) * numElems));
+  exclusive_scan_kernel<<<blocks, threads>>>(d_digits, d_digits_pos, numElems);
 
   checkCudaErrors(cudaFree(d_digits));
   checkCudaErrors(cudaFree(d_histogram));

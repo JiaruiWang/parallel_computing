@@ -57,7 +57,7 @@
 
   Tone-mapping
   ============
-
+  
   In this assignment we are going to transform the luminance channel (actually
   the log of the luminance, but this is unimportant for the parts of the
   algorithm that you will be implementing) by compressing its range to [0, 1].
@@ -110,7 +110,6 @@ __global__ void shared_mem_max_reduce_kernel(const float* const d_in,
   if (tid == 0)
   {
     d_out_max[blockIdx.x] = s_max[0];
-    // printf(" @Max = %f", s_max[0]);
   }
 }
 
@@ -135,7 +134,6 @@ __global__ void shared_mem_min_reduce_kernel(const float* const d_in,
       {
         s_min[tid] = s_min[tid + s];
       }
-  
     }
     __syncthreads();
   }
@@ -143,10 +141,36 @@ __global__ void shared_mem_min_reduce_kernel(const float* const d_in,
   if (tid == 0)
   {
     d_out_min[blockIdx.x] = s_min[0];
-    // printf(" min = %f", &s_min[0]);
   }
 }
 
+void reduce(float* d_in,
+            float* d_out_min_inter,
+            float* d_out_max_inter,
+            float* d_out_min,
+            float* d_out_max,
+            float &min_logLum,
+            float &max_logLum,
+            int numRows,
+            int numCols)
+{
+  int pixels = numCols*numRows;
+  int threads = 1024;
+  int blocks = ceil(1.0*pixels/threads);
+
+  shared_mem_max_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_max_inter, pixels);
+  shared_mem_min_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_min_inter, pixels);
+  threads = blocks;
+  blocks = 1;
+
+  shared_mem_max_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_out_max_inter, d_out_max, threads);
+  shared_mem_min_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_out_min_inter, d_out_min, threads);
+  
+  checkCudaErrors(cudaMemcpy(&max_logLum, d_out_max, sizeof(float), cudaMemcpyDeviceToHost));
+  checkCudaErrors(cudaMemcpy(&min_logLum, d_out_min, sizeof(float), cudaMemcpyDeviceToHost));
+
+
+}
 
 __global__ void histogram_kernel(const float* const d_logLuminance,
                                  unsigned int*  bin_out,
@@ -160,8 +184,6 @@ __global__ void histogram_kernel(const float* const d_logLuminance,
   if (index >= numCols * numRows) return;
 
   unsigned int bin = (int)((d_logLuminance[index] - min_logLum) / range_logLum * numBins);
-
-  //simple atomic Add implementation
   if (bin >= numBins)
   {
     bin = numBins -1;
@@ -177,7 +199,8 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
   if( index >= numBins) return;
   sh_bin[index] = bin[index];
   __syncthreads();
-  // simple scan implementation
+
+  // //simple scan implementation
   // int sum = 0;
   // for (int i = 1; i <= index; ++i)
   // {
@@ -187,8 +210,8 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
   // sh_bin[index] = sum;
   // __syncthreads();
   // bin[index] = sh_bin[index];
-  
-  // blelloch scan
+
+  // Blelloch scan
   for (int i = 2; i <= numBins; i *= 2)
   {
     if ((index+1)%i == 0)
@@ -199,6 +222,7 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
       
     }
     __syncthreads();
+
   }
 
   if (index == numBins-1)
@@ -207,8 +231,10 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
   }
   __syncthreads();
 
+  
   for (int i = numBins; i >= 2; i = i/2)
   {
+    __syncthreads();
     if ((index + 1) % i == 0)
     {
       int temp = sh_bin[index];
@@ -217,9 +243,10 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
       sh_bin[index] = temp + temp2;
     }
     __syncthreads();
-  }
-  bin[index] = sh_bin[index];
 
+  }
+
+  bin[index] = sh_bin[index];
   __syncthreads();
 }
 
@@ -248,32 +275,14 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
   float* d_out_max_inter;
   float* d_out_max;
   float* d_out_min;
-  int threads = 1024;
-  int blocks = ceil(1.0*pixels/threads);
-  if (ARRAY_BYTES == (int)sizeof(d_logLuminance))
-  {
-    printf("ARRAY_BYTES is correct\n");
-  }
   checkCudaErrors(cudaMalloc(&d_in, ARRAY_BYTES));
-  checkCudaErrors(cudaMalloc(&d_out_min_inter, blocks* sizeof(float)));
-  checkCudaErrors(cudaMalloc(&d_out_max_inter, blocks* sizeof(float)));
+  checkCudaErrors(cudaMalloc(&d_out_min_inter, ARRAY_BYTES));
+  checkCudaErrors(cudaMalloc(&d_out_max_inter, ARRAY_BYTES));
   checkCudaErrors(cudaMalloc(&d_out_min, sizeof(float)));
   checkCudaErrors(cudaMalloc(&d_out_max, sizeof(float)));
   checkCudaErrors(cudaMemcpy(d_in, d_logLuminance, ARRAY_BYTES, cudaMemcpyDeviceToDevice));
 
-
-
-  shared_mem_max_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_max_inter, pixels);
-  shared_mem_min_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_in, d_out_min_inter, pixels);
-  
-  threads = blocks;
-  blocks = 1;
-
-  shared_mem_max_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_out_max_inter, d_out_max, threads);
-  shared_mem_min_reduce_kernel<<< blocks, threads, threads * sizeof(float)>>>(d_out_min_inter, d_out_min, threads);
-  
-  checkCudaErrors(cudaMemcpy(&max_logLum, d_out_max, sizeof(float), cudaMemcpyDeviceToHost));
-  checkCudaErrors(cudaMemcpy(&min_logLum, d_out_min, sizeof(float), cudaMemcpyDeviceToHost));
+  reduce(d_in, d_out_min_inter, d_out_max_inter, d_out_min, d_out_max, min_logLum, max_logLum, numRows, numCols);
 
   cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
@@ -284,7 +293,8 @@ void your_histogram_and_prefixsum(const float* const d_logLuminance,
 
   float range_logLum = max_logLum - min_logLum;
 
-
+  int threads = 1024;
+  int blocks = ceil(1.0*pixels/threads);
   unsigned int* bin;
   checkCudaErrors(cudaMalloc(&bin, sizeof(unsigned int) * numBins));
   histogram_kernel<<<blocks, threads>>>(d_logLuminance, bin, min_logLum, range_logLum, numRows, numCols, numBins);

@@ -43,8 +43,8 @@
  */
 
 #include <stdio.h>
-__global__ void histogram_kernel(unsigned int* const d_inputVals,
-                                 unsigned int* const d_inputPos,
+__global__ void histogram_kernel(unsigned int* const d_inputVals_t,
+                                 unsigned int* const d_inputPos_t,
                                  unsigned int* const d_digits,
                                  unsigned int* const d_histogram,
                                  int digit,
@@ -53,7 +53,7 @@ __global__ void histogram_kernel(unsigned int* const d_inputVals,
   unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
   if (index >= numElems) return;
 
-  d_digits[index] = d_inputVals[index] & digit;
+  d_digits[index] = d_inputVals_t[index] & digit;
   unsigned int bin = d_digits[index];
   unsigned int step = 1;
   atomicAdd(&(d_histogram[bin]), step);
@@ -98,13 +98,13 @@ __global__ void exclusive_scan_kernel(unsigned int* d_digits,
   d_digits_pos[index] = sum;
   __syncthreads();
 
-  if (index == 0)
-  {
-    for (unsigned int i = 0; i < numElems; ++i)
-    {
-      printf("%u:%u ", i, d_digits_pos[i]);
-    }
-  }
+  // if (index == 0)
+  // {
+  //   for (unsigned int i = 0; i < numElems; ++i)
+  //   {
+  //     printf("%u:%u ", i, d_digits_pos[i]);
+  //   }
+  // }
   
   // blelloch scan
   // for (int i = 2; i <= numBins; i *= 2)
@@ -141,7 +141,80 @@ __global__ void exclusive_scan_kernel(unsigned int* d_digits,
   // __syncthreads();
 }
 
+__global__ void switch_ones_zeros(unsigned int* d_digits,
+                                  unsigned int* d_digits_reverse,
+                                  const size_t numElems)
+{
+  unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (index >= numElems) return;
 
+  if (d_digits[index] == 1)
+  {
+    d_digits_reverse[index ] = 0;
+  }
+  if (d_digits[index] == 0)
+  {
+    d_digits_reverse[index] = 1;
+  }
+  __syncthreads();
+  // if (index == 0)
+  // {
+  //   unsigned int sum = 0;
+  //   for (int i = 0; i < numElems; ++i)
+  //   {
+  //     printf("%u: %u->%u ", i, d_digits[i], d_digits_reverse[i]);
+  //     sum += d_digits_reverse[i];
+  //   }
+  //   printf("sum = %u\n", sum);
+  // }
+}
+
+__global__ void add_1_0_pos(unsigned int* d_digits_1_0_pos,
+                            unsigned int* d_digits,
+                            unsigned int* d_digits_1_pos,
+                            unsigned int* d_digits_reverse,
+                            unsigned int* d_digits_0_pos,
+                            const size_t numElems)
+{
+  unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (index >= numElems) return;
+
+  if (d_digits[index] == 1)
+  {
+    d_digits_1_0_pos[index] = d_digits_1_pos[index];
+  }
+  __syncthreads();
+  if (d_digits_reverse[index] == 1)
+  {
+    d_digits_1_0_pos[index] = d_digits_0_pos[index]; 
+  }
+  __syncthreads();
+
+  if (index == 1)
+  {
+    unsigned int sum = 0;
+    for (int i = 0; i < numElems; ++i)
+    {
+      printf("%u:%u ", i, d_digits_1_0_pos[i]);
+      sum += d_digits_1_0_pos[i];
+    }
+    printf("\nsum = %u\n", sum);
+  }
+}
+
+__global__ void move_kernel(unsigned int* d_inputVals_t,
+                            unsigned int* d_inputPos_t,
+                            unsigned int* d_outputVals_t,
+                            unsigned int* d_outputPos_t,
+                            unsigned int* d_digits_1_0_pos,
+                            unsigned int* d_prefix_sum,
+                            const size_t numElems)
+{
+  unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (index >= numElems) return;
+  // add d_prefix_sum to d_digits_1_0_pos
+
+}
 
 void your_sort(unsigned int* const d_inputVals,
                unsigned int* const d_inputPos,
@@ -153,6 +226,19 @@ void your_sort(unsigned int* const d_inputVals,
   //PUT YOUR SORT HERE
   int threads = 1024;
   int blocks = ceil(1.0 * numElems/ threads);
+  
+  unsigned int* d_inputVals_t;
+  checkCudaErrors(cudaMalloc(&d_inputVals_t, sizeof(unsigned int) * numElems));
+  checkCudaErrors(cudaMemcpy(d_inputVals_t, d_inputVals, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+  unsigned int* d_inputPos_t;
+  checkCudaErrors(cudaMalloc(&d_inputPos_t, sizeof(unsigned int) * numElems));
+  checkCudaErrors(cudaMemcpy(d_inputPos_t, d_inputPos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+  unsigned int* d_outputVals_t;
+  checkCudaErrors(cudaMalloc(&d_outputVals_t, sizeof(unsigned int) * numElems));
+  checkCudaErrors(cudaMemcpy(d_outputVals_t, d_outputVals, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+  unsigned int* d_outputPos_t;
+  checkCudaErrors(cudaMalloc(&d_outputPos_t, sizeof(unsigned int) * numElems));
+  checkCudaErrors(cudaMemcpy(d_outputPos_t, d_outputPos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
 
   unsigned int* d_digits;
   unsigned int* d_histogram;
@@ -163,7 +249,7 @@ void your_sort(unsigned int* const d_inputVals,
   checkCudaErrors(cudaMemset(d_histogram, 0, sizeof(unsigned int) * 2));
   checkCudaErrors(cudaMemset(d_prefix_sum, 0, sizeof(unsigned int) * 2));
   // 1)
-  histogram_kernel<<<blocks, threads>>>(d_inputVals, d_inputPos, d_digits, d_histogram, 0x1, numElems);
+  histogram_kernel<<<blocks, threads>>>(d_inputVals_t, d_inputPos_t, d_digits, d_histogram, 0x1, numElems);
   cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
   // 2)
   checkCudaErrors(cudaMemcpy(&(d_prefix_sum[1]), &(d_histogram[0]), sizeof(unsigned int), cudaMemcpyDeviceToDevice));
@@ -173,12 +259,24 @@ void your_sort(unsigned int* const d_inputVals,
   printf("d_prefix_sum[0]= %d, d_prefix_sum[1] = %d\n", h_prefix_sum[0], h_prefix_sum[1]);
 
   // 3)
-  unsigned int* d_digits_pos;
-  checkCudaErrors(cudaMalloc(&d_digits_pos, sizeof(unsigned int) * numElems));
-  exclusive_scan_kernel<<<blocks, threads>>>(d_digits, d_digits_pos, numElems);
+  unsigned int* d_digits_1_pos;
+  checkCudaErrors(cudaMalloc(&d_digits_1_pos, sizeof(unsigned int) * numElems));
+  exclusive_scan_kernel<<<blocks, threads>>>(d_digits, d_digits_1_pos, numElems);
+
+  unsigned int* d_digits_0_pos;
+  checkCudaErrors(cudaMalloc(&d_digits_0_pos, sizeof(unsigned int) * numElems));
+  unsigned int* d_digits_reverse;
+  checkCudaErrors(cudaMalloc(&d_digits_reverse, sizeof(unsigned int) * numElems));
+  switch_ones_zeros<<<blocks, threads>>>(d_digits, d_digits_reverse, numElems);
+  exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
+
+  unsigned int* d_digits_1_0_pos;
+  checkCudaErrors(cudaMalloc(&d_digits_1_0_pos, sizeof(unsigned int) * numElems));
+  add_1_0_pos<<<blocks, threads>>>(d_digits_1_0_pos, d_digits, d_digits_1_pos, d_digits_reverse, d_digits_0_pos, numElems);
 
   checkCudaErrors(cudaFree(d_digits));
   checkCudaErrors(cudaFree(d_histogram));
 
+  // 4)
 
 }

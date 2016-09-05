@@ -150,7 +150,7 @@ __global__ void switch_ones_zeros(unsigned int* d_digits,
 
   if (d_digits[index] == 1)
   {
-    d_digits_reverse[index ] = 0;
+    d_digits_reverse[index] = 0;
   }
   if (d_digits[index] == 0)
   {
@@ -190,15 +190,43 @@ __global__ void add_1_0_pos(unsigned int* d_digits_1_0_pos,
   }
   __syncthreads();
 
-  if (index == 1)
+  // if (index == 1)
+  // {
+  //   unsigned int sum = 0;
+  //   for (int i = 0; i < numElems; ++i)
+  //   {
+  //     printf("%u:%u ", i, d_digits_1_0_pos[i]);
+  //     sum += d_digits_1_0_pos[i];
+  //   }
+  //   printf("\nsum = %u\n", sum);
+  // }
+}
+
+__global__ void add_prefix_to_pos(unsigned int* d_digits_ab_pos,
+                                  // unsigned int* d_digits_1_0_pos,
+                                  unsigned int* d_digits,
+                                  // unsigned int* d_digits_1_pos,
+                                  // unsigned int* d_digits_reverse,
+                                  // unsigned int* d_digits_0_pos,
+                                  unsigned int* d_prefix_sum,
+                                  const size_t numElems)
+{
+  unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (index >= numElems) return;
+
+  if (d_digits[index] == 1)
   {
-    unsigned int sum = 0;
+    d_digits_ab_pos[index] = d_digits_ab_pos[index] + d_prefix_sum[1];
+  }
+  __syncthreads();
+
+
+  if (index == 0)
+  {
     for (int i = 0; i < numElems; ++i)
     {
-      printf("%u:%u ", i, d_digits_1_0_pos[i]);
-      sum += d_digits_1_0_pos[i];
+      printf("%u:%u ", i, d_digits_ab_pos[i]);
     }
-    printf("\nsum = %u\n", sum);
   }
 }
 
@@ -206,13 +234,13 @@ __global__ void move_kernel(unsigned int* d_inputVals_t,
                             unsigned int* d_inputPos_t,
                             unsigned int* d_outputVals_t,
                             unsigned int* d_outputPos_t,
-                            unsigned int* d_digits_1_0_pos,
-                            unsigned int* d_prefix_sum,
+                            unsigned int* d_digits_ab_pos,
                             const size_t numElems)
 {
   unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
   if (index >= numElems) return;
-  // add d_prefix_sum to d_digits_1_0_pos
+  
+
 
 }
 
@@ -257,26 +285,39 @@ void your_sort(unsigned int* const d_inputVals,
   unsigned int* h_prefix_sum = (unsigned int*)malloc(sizeof(unsigned int) * 2);
   checkCudaErrors(cudaMemcpy(h_prefix_sum, d_prefix_sum, sizeof(unsigned int) * 2, cudaMemcpyDeviceToHost));
   printf("d_prefix_sum[0]= %d, d_prefix_sum[1] = %d\n", h_prefix_sum[0], h_prefix_sum[1]);
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
   // 3)
   unsigned int* d_digits_1_pos;
   checkCudaErrors(cudaMalloc(&d_digits_1_pos, sizeof(unsigned int) * numElems));
   exclusive_scan_kernel<<<blocks, threads>>>(d_digits, d_digits_1_pos, numElems);
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
   unsigned int* d_digits_0_pos;
   checkCudaErrors(cudaMalloc(&d_digits_0_pos, sizeof(unsigned int) * numElems));
   unsigned int* d_digits_reverse;
   checkCudaErrors(cudaMalloc(&d_digits_reverse, sizeof(unsigned int) * numElems));
   switch_ones_zeros<<<blocks, threads>>>(d_digits, d_digits_reverse, numElems);
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
   exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
   unsigned int* d_digits_1_0_pos;
   checkCudaErrors(cudaMalloc(&d_digits_1_0_pos, sizeof(unsigned int) * numElems));
   add_1_0_pos<<<blocks, threads>>>(d_digits_1_0_pos, d_digits, d_digits_1_pos, d_digits_reverse, d_digits_0_pos, numElems);
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+
+  // 4)
+  unsigned int* d_digits_ab_pos;
+  checkCudaErrors(cudaMalloc(&d_digits_ab_pos, sizeof(unsigned int) * numElems));
+  checkCudaErrors(cudaMemcpy(d_digits_ab_pos, d_digits_1_0_pos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+  add_prefix_to_pos<<<blocks, threads>>>(d_digits_ab_pos, d_digits, d_prefix_sum, numElems);
+  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+
 
   checkCudaErrors(cudaFree(d_digits));
   checkCudaErrors(cudaFree(d_histogram));
-
-  // 4)
 
 }

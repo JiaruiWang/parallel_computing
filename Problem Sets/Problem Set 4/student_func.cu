@@ -2,7 +2,8 @@
 //Radix Sorting
 
 #include "utils.h"
-#include <thrust/host_vector.h>
+#include <thrust/device_vector.h>
+#include <cstdio>
 
 /* Red Eye Removal
    ===============
@@ -47,39 +48,26 @@ __global__ void histogram_kernel(unsigned int* const d_inputVals_t,
                                  unsigned int* const d_inputPos_t,
                                  unsigned int* const d_digits,
                                  unsigned int* const d_histogram,
-                                 int digit,
+                                 unsigned int digit,
+                                 unsigned int i,
                                  int numElems)
 {
   unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
   if (index >= numElems) return;
 
-  d_digits[index] = d_inputVals_t[index] & digit;
+  d_digits[index] = (d_inputVals_t[index] & digit) >> i;
   unsigned int bin = d_digits[index];
   unsigned int step = 1;
   atomicAdd(&(d_histogram[bin]), step);
 
-  if (index == 0)
-  {
-    printf("numElems = %d\n", numElems);
-    printf("d_digits[%d] = %d\n", index, d_digits[index]);
-    printf("hist : 0 = %d, 1 = %d\n", d_histogram[0], d_histogram[1]);
-  }
+  // if (index == 0)
+  // {
+  //   printf("numElems = %d\n", numElems);
+  //   printf("d_digits[%d] = %d\n", index, d_digits[index]);
+  //   printf("hist : 0 = %d, 1 = %d\n", d_histogram[0], d_histogram[1]);
+  // }
 }
 
-__global__ void relative_exclusive_scan(unsigned int* const d_inputVals,
-                                        unsigned int* const d_inputPos,
-                                        unsigned int* const d_outputVals,
-                                        unsigned int* const d_outputPos,
-                                        unsigned int* d_prefix_sum,
-                                        const size_t numElems)
-{
-  unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
-  if (index >= numElems) return;
-
-  //unsigned int bin = d_inputVals[index] & 1;
-  
-
-}
 
 __global__ void exclusive_scan_kernel(unsigned int* d_digits,
                                       unsigned int* d_digits_pos,
@@ -221,13 +209,13 @@ __global__ void add_prefix_to_pos(unsigned int* d_digits_ab_pos,
   __syncthreads();
 
 
-  if (index == 0)
-  {
-    for (int i = 0; i < numElems; ++i)
-    {
-      printf("%u:%u ", i, d_digits_ab_pos[i]);
-    }
-  }
+  // if (index == 0)
+  // {
+  //   for (int i = 0; i < numElems; ++i)
+  //   {
+  //     printf("%u:%u ", i, d_digits_ab_pos[i]);
+  //   }
+  // }
 }
 
 __global__ void move_kernel(unsigned int* d_inputVals_t,
@@ -240,8 +228,24 @@ __global__ void move_kernel(unsigned int* d_inputVals_t,
   unsigned int index = blockDim.x * blockIdx.x + threadIdx.x;
   if (index >= numElems) return;
   
+  d_outputVals_t[d_digits_ab_pos[index]] = d_inputVals_t[index];
+  d_outputPos_t[d_digits_ab_pos[index]] = d_inputPos_t[index];
 
-
+  // if (index == 0)
+  // {
+  //   for (unsigned int i = 0; i < numElems; ++i)
+  //   {
+  //     if (i == 220474)
+  //     {
+  //       printf("d_inputVals_t[%u] = %u\nd_inputPos_t[%u] = %u\nd_digits_ab_pos[%u] = %u\n", 
+  //         i, d_inputVals_t[i], i, d_inputPos_t[i], i, d_digits_ab_pos[i]);
+  //     }
+  //     if (i == 220479)
+  //     {
+  //       printf("d_outputVals_t[%u] = %u\nd_outputPos_t[%u] = %u\n", i, d_outputVals_t[i], i, d_outputPos_t[i]);
+  //     }
+  //   }
+  // }
 }
 
 void your_sort(unsigned int* const d_inputVals,
@@ -269,55 +273,85 @@ void your_sort(unsigned int* const d_inputVals,
   checkCudaErrors(cudaMemcpy(d_outputPos_t, d_outputPos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
 
   unsigned int* d_digits;
-  unsigned int* d_histogram;
-  unsigned int* d_prefix_sum;
   checkCudaErrors(cudaMalloc(&d_digits, sizeof(unsigned int) * numElems));
+  unsigned int* d_histogram;
   checkCudaErrors(cudaMalloc(&d_histogram, sizeof(unsigned int) * 2));
+  
+  unsigned int* d_prefix_sum;
   checkCudaErrors(cudaMalloc(&d_prefix_sum, sizeof(unsigned int) * 2));
-  checkCudaErrors(cudaMemset(d_histogram, 0, sizeof(unsigned int) * 2));
-  checkCudaErrors(cudaMemset(d_prefix_sum, 0, sizeof(unsigned int) * 2));
-  // 1)
-  histogram_kernel<<<blocks, threads>>>(d_inputVals_t, d_inputPos_t, d_digits, d_histogram, 0x1, numElems);
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-  // 2)
-  checkCudaErrors(cudaMemcpy(&(d_prefix_sum[1]), &(d_histogram[0]), sizeof(unsigned int), cudaMemcpyDeviceToDevice));
-
-  unsigned int* h_prefix_sum = (unsigned int*)malloc(sizeof(unsigned int) * 2);
-  checkCudaErrors(cudaMemcpy(h_prefix_sum, d_prefix_sum, sizeof(unsigned int) * 2, cudaMemcpyDeviceToHost));
-  printf("d_prefix_sum[0]= %d, d_prefix_sum[1] = %d\n", h_prefix_sum[0], h_prefix_sum[1]);
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-
-  // 3)
+  
   unsigned int* d_digits_1_pos;
   checkCudaErrors(cudaMalloc(&d_digits_1_pos, sizeof(unsigned int) * numElems));
-  exclusive_scan_kernel<<<blocks, threads>>>(d_digits, d_digits_1_pos, numElems);
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-
   unsigned int* d_digits_0_pos;
   checkCudaErrors(cudaMalloc(&d_digits_0_pos, sizeof(unsigned int) * numElems));
   unsigned int* d_digits_reverse;
   checkCudaErrors(cudaMalloc(&d_digits_reverse, sizeof(unsigned int) * numElems));
-  switch_ones_zeros<<<blocks, threads>>>(d_digits, d_digits_reverse, numElems);
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-  exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-
   unsigned int* d_digits_1_0_pos;
   checkCudaErrors(cudaMalloc(&d_digits_1_0_pos, sizeof(unsigned int) * numElems));
-  add_1_0_pos<<<blocks, threads>>>(d_digits_1_0_pos, d_digits, d_digits_1_pos, d_digits_reverse, d_digits_0_pos, numElems);
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-
-
-  // 4)
   unsigned int* d_digits_ab_pos;
   checkCudaErrors(cudaMalloc(&d_digits_ab_pos, sizeof(unsigned int) * numElems));
-  checkCudaErrors(cudaMemcpy(d_digits_ab_pos, d_digits_1_0_pos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
-  add_prefix_to_pos<<<blocks, threads>>>(d_digits_ab_pos, d_digits, d_prefix_sum, numElems);
-  cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+  unsigned int one = 1;
+  unsigned int thirtyTwo = (unsigned int)sizeof(unsigned int) * 8;
+  for (unsigned int i = 0; i < thirtyTwo; ++i)
+  {
+    // 1)
+    // printf("%u, one << i = %u, sizeof(unsigned int) * 8 = %u\n", i, one << i,(unsigned int)sizeof(unsigned int) * 8);
+    checkCudaErrors(cudaMemset(d_histogram, 0, sizeof(unsigned int) * 2));
+    checkCudaErrors(cudaMemset(d_prefix_sum, 0, sizeof(unsigned int) * 2));
+    histogram_kernel<<<blocks, threads>>>(d_inputVals_t, d_inputPos_t, d_digits, d_histogram, one << i, i, numElems);
+    // printf("1\n");
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    // 2)
+    // printf("2\n");
+    checkCudaErrors(cudaMemcpy(&(d_prefix_sum[1]), &(d_histogram[0]), sizeof(unsigned int), cudaMemcpyDeviceToDevice));
+
+    // unsigned int* h_prefix_sum = (unsigned int*)malloc(sizeof(unsigned int) * 2);
+    // checkCudaErrors(cudaMemcpy(h_prefix_sum, d_prefix_sum, sizeof(unsigned int) * 2, cudaMemcpyDeviceToHost));
+    // printf("d_prefix_sum[0]= %d, d_prefix_sum[1] = %d\n", h_prefix_sum[0], h_prefix_sum[1]);
+    // cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+    // 3)
+
+    exclusive_scan_kernel<<<blocks, threads>>>(d_digits, d_digits_1_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
 
+    switch_ones_zeros<<<blocks, threads>>>(d_digits, d_digits_reverse, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
+
+    add_1_0_pos<<<blocks, threads>>>(d_digits_1_0_pos, d_digits, d_digits_1_pos, d_digits_reverse, d_digits_0_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+
+    // 4)
+
+    checkCudaErrors(cudaMemcpy(d_digits_ab_pos, d_digits_1_0_pos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+    add_prefix_to_pos<<<blocks, threads>>>(d_digits_ab_pos, d_digits, d_prefix_sum, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+
+    move_kernel<<<blocks, threads>>>(d_inputVals_t, d_inputPos_t, d_outputVals_t, d_outputPos_t, d_digits_ab_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    std::swap(d_inputVals_t, d_outputVals_t);
+    std::swap(d_inputPos_t, d_outputPos_t);
+  }
+  
+  checkCudaErrors(cudaMemcpy(d_outputVals, d_inputVals_t, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+  checkCudaErrors(cudaMemcpy(d_outputPos, d_inputPos_t, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+
+  checkCudaErrors(cudaFree(d_inputVals_t));
+  checkCudaErrors(cudaFree(d_inputPos_t));
+  checkCudaErrors(cudaFree(d_outputVals_t));
+  checkCudaErrors(cudaFree(d_outputPos_t));
   checkCudaErrors(cudaFree(d_digits));
   checkCudaErrors(cudaFree(d_histogram));
-
+  checkCudaErrors(cudaFree(d_prefix_sum));
+  checkCudaErrors(cudaFree(d_digits_1_pos));
+  checkCudaErrors(cudaFree(d_digits_0_pos));
+  checkCudaErrors(cudaFree(d_digits_reverse));
+  checkCudaErrors(cudaFree(d_digits_1_0_pos));
+  checkCudaErrors(cudaFree(d_digits_ab_pos));
 }

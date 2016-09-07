@@ -211,40 +211,55 @@ __global__ void exclusive_scan_kernel(unsigned int* bin,
   // __syncthreads();
   // bin[index] = sh_bin[index];
 
-  // Blelloch scan
-  for (int i = 2; i <= numBins; i *= 2)
-  {
-    if ((index+1)%i == 0)
-    {
-      int temp = sh_bin[index];
-      int temp2 = sh_bin[index - i/2];
-      sh_bin[index] = temp + temp2;
+  // // Blelloch scan
+  // for (int i = 2; i <= numBins; i *= 2)
+  // {
+  //   if ((index+1)%i == 0)
+  //   {
+  //     int temp = sh_bin[index];
+  //     int temp2 = sh_bin[index - i/2];
+  //     sh_bin[index] = temp + temp2;
       
-    }
-    __syncthreads();
+  //   }
+  //   __syncthreads();
 
-  }
+  // }
 
-  if (index == numBins-1)
-  {
-   sh_bin[numBins-1] = 0;
-  }
-  __syncthreads();
+  // if (index == numBins-1)
+  // {
+  //  sh_bin[numBins-1] = 0;
+  // }
+  // __syncthreads();
 
   
-  for (int i = numBins; i >= 2; i = i/2)
+  // for (int i = numBins; i >= 2; i = i/2)
+  // {
+  //   __syncthreads();
+  //   if ((index + 1) % i == 0)
+  //   {
+  //     int temp = sh_bin[index];
+  //     int temp2 =sh_bin[index - i/2];
+  //     sh_bin[index - i/2] = temp;
+  //     sh_bin[index] = temp + temp2;
+  //   }
+  //   __syncthreads();
+
+  // }
+
+  // Hillis/Steele
+  for (int i = 2; i <= 1024; i *= 2)
   {
+    unsigned int current = sh_bin[index];
+    unsigned int pre = 0;
+    if (index - i/2 >=0)
+      pre = sh_bin[index - i/2];
     __syncthreads();
-    if ((index + 1) % i == 0)
-    {
-      int temp = sh_bin[index];
-      int temp2 =sh_bin[index - i/2];
-      sh_bin[index - i/2] = temp;
-      sh_bin[index] = temp + temp2;
-    }
+    sh_bin[index] = current + pre;
     __syncthreads();
 
   }
+  sh_bin[index] = sh_bin[index] - bin[index];
+  __syncthreads();
 
   bin[index] = sh_bin[index];
   __syncthreads();

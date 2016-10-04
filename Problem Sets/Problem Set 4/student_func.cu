@@ -68,6 +68,168 @@ __global__ void histogram_kernel(unsigned int* const d_inputVals_t,
   // }
 }
 
+__global__ void block_exclusive_scan_kernel(unsigned int* d_digits,
+                                            unsigned int* d_digits_pos,
+                                            unsigned int* d_blelloch_inter,
+                                            const unsigned int numElems)
+{
+  extern __shared__ unsigned int sh_mem[];
+  int global_index = blockIdx.x * blockDim.x + threadIdx.x;
+  int block_index = threadIdx.x;
+  if( global_index >= numElems) sh_mem[block_index] = 0;
+  else sh_mem[block_index] = d_digits[global_index];
+__syncthreads();
+//   if (global_index == 1024)
+//   {
+//     for (int i = 0; i < 1024; ++i)
+//     {
+//       printf("sh_mem_0[%d] =%u, \n", i, sh_mem[i]);
+//     }
+//   }
+// __syncthreads();
+    // Blelloch scan
+  
+
+  for (int i = 2; i <= 1024; i *= 2)
+  {
+    if ((block_index+1)%i == 0)
+    {
+      int temp = sh_mem[block_index];
+      int temp2 = sh_mem[block_index - i/2];
+      sh_mem[block_index] = temp + temp2;
+      
+    }
+    __syncthreads();
+
+  }
+
+  if (block_index == 1023)
+  {
+   sh_mem[1023] = 0;
+  }
+  __syncthreads();
+
+  
+  for (int i = 1024; i >= 2; i = i/2)
+  {
+    __syncthreads();
+    if ((block_index + 1) % i == 0)
+    {
+      int temp = sh_mem[block_index];
+      int temp2 =sh_mem[block_index - i/2];
+      sh_mem[block_index - i/2] = temp;
+      sh_mem[block_index] = temp + temp2;
+    }
+    __syncthreads();
+
+  }
+  
+  if (block_index == 1023)
+  {
+   d_blelloch_inter[blockIdx.x] = sh_mem[block_index] + d_digits[global_index];
+   // printf("blockidx.x =%d\n", blockIdx.x);
+  }
+  __syncthreads();
+  if (global_index < numElems) d_digits_pos[global_index] = sh_mem[block_index];
+  __syncthreads();
+
+//   if (global_index == 220000)
+//   {
+//     for (int i = 0; i < 1024; ++i)
+//     {
+//       printf("sh_mem_0[%d] =%u, \n", i, sh_mem[i]);
+//     }
+//   }
+// __syncthreads();
+//   if (global_index == 1024)
+//   {
+//     // int sum = 0;
+//     // for (int i = 0; i < 216; ++i)
+//     // {
+//     //   printf("d_blelloch_inter[%d] = %u, \n", i, d_blelloch_inter[i]);
+//     //   sum += d_blelloch_inter[i];
+//     // }
+//     // printf("sum = %d\n", sum);
+//     // for (int i = 0; i < numElems; ++i)
+//     // {
+//     //   printf("%d:%u\n", i, d_digits_pos[i]);
+//     // }
+//   }
+// __syncthreads();
+}
+
+
+__global__ void self_exclusive_scan_kernel(unsigned int* d_blelloch_inter,
+                                           const unsigned int numElems)
+{
+  extern __shared__ unsigned int sh_mem[];
+  int block_index = blockDim.x * blockIdx.x + threadIdx.x;
+  if (block_index >= numElems) sh_mem[block_index] = 0;
+  else sh_mem[block_index] = d_blelloch_inter[block_index];
+  __syncthreads();
+
+  for (int i = 2; i <= 1024; i *= 2)
+  {
+    if ((block_index+1)%i == 0)
+    {
+      int temp = sh_mem[block_index];
+      int temp2 = sh_mem[block_index - i/2];
+      sh_mem[block_index] = temp + temp2;
+      
+    }
+    __syncthreads();
+
+  }
+
+  if (block_index == 1023)
+  {
+   sh_mem[1023] = 0;
+  }
+  __syncthreads();
+
+  
+  for (int i = 1024; i >= 2; i = i/2)
+  {
+    __syncthreads();
+    if ((block_index + 1) % i == 0)
+    {
+      int temp = sh_mem[block_index];
+      int temp2 =sh_mem[block_index - i/2];
+      sh_mem[block_index - i/2] = temp;
+      sh_mem[block_index] = temp + temp2;
+    }
+    __syncthreads();
+
+  }
+
+  d_blelloch_inter[block_index] = sh_mem[block_index];
+  __syncthreads();
+  // if (block_index == 0)
+  // {
+  //   for (int i = 0; i < numElems; ++i)
+  //   {
+  //     printf("d_blelloch_inter[%d] = %u\n", i, d_blelloch_inter[i]);
+  //   }
+  // }
+}
+
+__global__ void add_inter_kernel(unsigned int* d_blelloch_inter,
+                                 unsigned int* d_digits_pos,
+                                 unsigned int numElems)
+{
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  if (index >= numElems) return;
+
+  d_digits_pos[index] = d_digits_pos[index] + d_blelloch_inter[blockIdx.x];
+
+  // if (index == 0)
+  // {
+  //   for (int i = 0; i < numElems; ++i)
+  //   {
+  //     printf("%d:%u\n", i, d_digits_pos[i]);
+  //   }
+  // }
+}
 
 __global__ void exclusive_scan_kernel(unsigned int* d_digits,
                                       unsigned int* d_digits_pos,
@@ -76,15 +238,15 @@ __global__ void exclusive_scan_kernel(unsigned int* d_digits,
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   if( index >= numElems) return;
 
-  // // simple scan implementation
-  // int sum = 0;
-  // for (int i = 1; i <= index; ++i)
-  // {
-  //   sum += d_digits[i-1];
-  // }
-  // __syncthreads();
-  // d_digits_pos[index] = sum;
-  // __syncthreads();
+  // simple scan implementation
+  int sum = 0;
+  for (int i = 1; i <= index; ++i)
+  {
+    sum += d_digits[i-1];
+  }
+  __syncthreads();
+  d_digits_pos[index] = sum;
+  __syncthreads();
 
 
   
@@ -131,33 +293,32 @@ __global__ void exclusive_scan_kernel(unsigned int* d_digits,
   // }
 
   // Hillis/Steele
-  d_digits_pos[index] = d_digits[index];
-  __syncthreads();
+  // d_digits_pos[index] = d_digits[index];
+  // __syncthreads();
 
-  for (int i = 2; i <= 512; i *= 2)
-  {
-    unsigned int current = d_digits_pos[index];
-    unsigned int pre = 0;
-    if (index - i/2 >=0)
-      pre = d_digits_pos[index - i/2];
-    __syncthreads();
-    d_digits_pos[index] = current + pre;
-    __syncthreads();
+  // for (int i = 2; i <= 512; i *= 2)
+  // {
+  //   unsigned int current = d_digits_pos[index];
+  //   unsigned int pre = 0;
+  //   if (index - i/2 >=0)
+  //     pre = d_digits_pos[index - i/2];
+  //   __syncthreads();
+  //   d_digits_pos[index] = current + pre;
+  //   __syncthreads();
+  // }
+  // d_digits_pos[index] = d_digits_pos[index] - d_digits[index];
+  // __syncthreads();
 
-  }
-  d_digits_pos[index] = d_digits_pos[index] - d_digits[index];
-  __syncthreads();
-
-  if (index == 0)
-  {
-    // int sum = 0;
-    for (unsigned int i = 0; i < numElems; ++i)
-    {
-      printf("%u:%u ", i, d_digits_pos[i]);
-      // sum += d_digits_pos[i];
-    }
-    // printf("\nsum = %d\n", sum);
-  }
+  // if (index == 0)
+  // {
+  //   // int sum = 0;
+  //   for (unsigned int i = 0; i < numElems; ++i)
+  //   {
+  //     printf("%u:%u ", i, d_digits_pos[i]);
+  //     // sum += d_digits_pos[i];
+  //   }
+  //   // printf("\nsum = %d\n", sum);
+  // }
 
 }
 
@@ -322,16 +483,19 @@ void your_sort(unsigned int* const d_inputVals,
   checkCudaErrors(cudaMalloc(&d_digits_1_0_pos, sizeof(unsigned int) * numElems));
   unsigned int* d_digits_ab_pos;
   checkCudaErrors(cudaMalloc(&d_digits_ab_pos, sizeof(unsigned int) * numElems));
+  unsigned int* d_blelloch_inter;
+  checkCudaErrors(cudaMalloc(&d_blelloch_inter, sizeof(unsigned int) * blocks));
 
   unsigned int one = 1;
   unsigned int thirtyTwo = (unsigned int)sizeof(unsigned int) * 8;
-  for (unsigned int i = 0; i < 1; ++i)
+  for (unsigned int i = 0; i < thirtyTwo; ++i)
   {
     // 1)
     // printf("%u, one << i = %u, sizeof(unsigned int) * 8 = %u\n", i, one << i,(unsigned int)sizeof(unsigned int) * 8);
     checkCudaErrors(cudaMemset(d_histogram, 0, sizeof(unsigned int) * 2));
     checkCudaErrors(cudaMemset(d_prefix_sum, 0, sizeof(unsigned int) * 2));
     checkCudaErrors(cudaMemset(d_digits_1_pos, 0, sizeof(unsigned int) * numElems));
+    
     histogram_kernel<<<blocks, threads>>>(d_inputVals_t, d_inputPos_t, d_digits, d_histogram, one << i, i, numElems);
     // printf("1\n");
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
@@ -346,35 +510,56 @@ void your_sort(unsigned int* const d_inputVals,
 
     // 3)
     checkCudaErrors(cudaMemcpy(d_digits_1_pos, d_digits, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
-    exclusive_scan_kernel<<<blocks, threads>>>(d_digits, d_digits_1_pos, numElems);
+    checkCudaErrors(cudaMemset(d_blelloch_inter, 0, sizeof(unsigned int) * blocks));
+    block_exclusive_scan_kernel<<<blocks, threads, sizeof(unsigned int) * 1024>>>(d_digits, d_digits_1_pos, d_blelloch_inter, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    self_exclusive_scan_kernel<<<1, threads, sizeof(unsigned int) * 1024>>>(d_blelloch_inter, 216);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    add_inter_kernel<<<blocks, threads>>>(d_blelloch_inter, d_digits_1_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    // unsigned int* h_blelloch_inter = (unsigned int*)malloc(sizeof(unsigned int) * blocks);
+    // checkCudaErrors(cudaMemcpy(h_blelloch_inter, d_blelloch_inter, sizeof(unsigned int) * blocks, cudaMemcpyDeviceToHost));
+    // for (int i = 0; i < blocks; ++i)
+    // {
+    //   printf("d_blelloch_inter[%d]= %d,", i, d_blelloch_inter[i]);
+    // }
+   
+    // cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError()); 
+
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
 
-    // switch_ones_zeros<<<blocks, threads>>>(d_digits, d_digits_reverse, numElems);
-    // cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    // exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
-    // cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    switch_ones_zeros<<<blocks, threads>>>(d_digits, d_digits_reverse, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
+    checkCudaErrors(cudaMemset(d_blelloch_inter, 0, sizeof(unsigned int) * blocks));
+    block_exclusive_scan_kernel<<<blocks, threads, sizeof(unsigned int) * 1024>>>(d_digits_reverse, d_digits_0_pos, d_blelloch_inter, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    self_exclusive_scan_kernel<<<1, threads, sizeof(unsigned int) * 1024>>>(d_blelloch_inter, 216);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    add_inter_kernel<<<blocks, threads>>>(d_blelloch_inter, d_digits_0_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
 
-    // add_1_0_pos<<<blocks, threads>>>(d_digits_1_0_pos, d_digits, d_digits_1_pos, d_digits_reverse, d_digits_0_pos, numElems);
-    // cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    add_1_0_pos<<<blocks, threads>>>(d_digits_1_0_pos, d_digits, d_digits_1_pos, d_digits_reverse, d_digits_0_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
 
-    // // 4)
+    // 4)
 
-    // checkCudaErrors(cudaMemcpy(d_digits_ab_pos, d_digits_1_0_pos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
-    // add_prefix_to_pos<<<blocks, threads>>>(d_digits_ab_pos, d_digits, d_prefix_sum, numElems);
-    // cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    checkCudaErrors(cudaMemcpy(d_digits_ab_pos, d_digits_1_0_pos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
+    add_prefix_to_pos<<<blocks, threads>>>(d_digits_ab_pos, d_digits, d_prefix_sum, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
-    // move_kernel<<<blocks, threads>>>(d_inputVals_t, d_inputPos_t, d_outputVals_t, d_outputPos_t, d_digits_ab_pos, numElems);
-    // cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    // std::swap(d_inputVals_t, d_outputVals_t);
-    // std::swap(d_inputPos_t, d_outputPos_t);
+    move_kernel<<<blocks, threads>>>(d_inputVals_t, d_inputPos_t, d_outputVals_t, d_outputPos_t, d_digits_ab_pos, numElems);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    std::swap(d_inputVals_t, d_outputVals_t);
+    std::swap(d_inputPos_t, d_outputPos_t);
   }
   
   checkCudaErrors(cudaMemcpy(d_outputVals, d_inputVals_t, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
   checkCudaErrors(cudaMemcpy(d_outputPos, d_inputPos_t, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
-
+  checkCudaErrors(cudaFree(d_blelloch_inter));
   checkCudaErrors(cudaFree(d_inputVals_t));
   checkCudaErrors(cudaFree(d_inputPos_t));
   checkCudaErrors(cudaFree(d_outputVals_t));

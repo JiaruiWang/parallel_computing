@@ -39,25 +39,25 @@ GCC_OPTS=-O3 -Wall -Wextra -m64
 
 
 student: main.o student_func.o HW4.o loadSaveImage.o compare.o reference_calc.o Makefile
-	$(NVCC) -o HW4 main.o student_func.o HW4.o loadSaveImage.o compare.o reference_calc.o -L $(OPENCV_LIBPATH) $(OPENCV_LIBS) $(NVCC_OPTS) -I $(CUDA_INCLUDEPATH) -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
+	$(NVCC) -o HW4 main.o student_func.o HW4.o loadSaveImage.o compare.o reference_calc.o -L $(OPENCV_LIBPATH) $(OPENCV_LIBS) $(NVCC_OPTS)  -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
 
 main.o: main.cpp timer.h utils.h reference_calc.h
-	g++ -c main.cpp $(GCC_OPTS) -I $(CUDA_INCLUDEPATH)
+	g++ -c main.cpp $(GCC_OPTS) 
 
 HW4.o: HW4.cu loadSaveImage.h utils.h
-	$(NVCC) -c HW4.cu -I $(OPENCV_INCLUDEPATH) $(NVCC_OPTS) -I $(CUDA_INCLUDEPATH) -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
+	$(NVCC) -c HW4.cu -I $(OPENCV_INCLUDEPATH) $(NVCC_OPTS)  -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
 
 loadSaveImage.o: loadSaveImage.cpp loadSaveImage.h
-	g++ -c loadSaveImage.cpp -I $(OPENCV_INCLUDEPATH) $(GCC_OPTS) -I $(CUDA_INCLUDEPATH)
+	g++ -c loadSaveImage.cpp -I $(OPENCV_INCLUDEPATH) $(GCC_OPTS) 
 
 compare.o: compare.cpp compare.h
-	g++ -c compare.cpp -I $(OPENCV_INCLUDEPATH) $(GCC_OPTS) -I $(CUDA_INCLUDEPATH)
+	g++ -c compare.cpp -I $(OPENCV_INCLUDEPATH) $(GCC_OPTS) 
 
 reference_calc.o: reference_calc.cpp reference_calc.h
-	g++ -c reference_calc.cpp -I $(OPENCV_INCLUDEPATH) $(GCC_OPTS) -I $(CUDA_INCLUDEPATH)
+	g++ -c reference_calc.cpp -I $(OPENCV_INCLUDEPATH) $(GCC_OPTS) 
 
 student_func.o: student_func.cu reference_calc.cpp utils.h
-	$(NVCC) -c student_func.cu $(NVCC_OPTS) -I $(CUDA_INCLUDEPATH) -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
+	$(NVCC) -c student_func.cu $(NVCC_OPTS)  -ldir $(CUDA_LIBDEVICPATH) -L $(CUDA_LIBPATH)
 
 clean:
 	rm -f *.o *.png hw

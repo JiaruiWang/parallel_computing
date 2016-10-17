@@ -531,7 +531,7 @@ void your_sort(unsigned int* const d_inputVals,
 
     switch_ones_zeros<<<blocks, threads>>>(d_digits, d_digits_reverse, numElems);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
+    // exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
     checkCudaErrors(cudaMemset(d_blelloch_inter, 0, sizeof(unsigned int) * blocks));
     block_exclusive_scan_kernel<<<blocks, threads, sizeof(unsigned int) * 1024>>>(d_digits_reverse, d_digits_0_pos, d_blelloch_inter, numElems);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());

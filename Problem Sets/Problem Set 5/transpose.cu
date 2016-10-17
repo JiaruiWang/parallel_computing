@@ -2,7 +2,7 @@
 #include "gputimer.h"
 
 const int N= 1024;		// matrix size is NxN
-const int K= 64;				// tile size is KxK
+const int K= 32;				// tile size is KxK
 
 // Utility functions: compare, print, and fill matrices
 #define checkCudaErrors(val) check( (val), #val, __FILE__, __LINE__)
@@ -231,8 +231,8 @@ int main(int argc, char **argv)
 	printf("transpose_parallel_per_element_tiled %dx%d: %g ms.\nVerifying ...%s\n", 
 		   K, K, timer.Elapsed(), compare_matrices(out, gold) ? "Failed" : "Success");
 	
-	dim3 blocks16x16(N/K,N/K); // blocks per grid
-	dim3 threads16x16(K,K);	 // threads per block
+	dim3 blocks16x16(N/16,N/16); // blocks per grid
+	dim3 threads16x16(16,16);	 // threads per block
 
 	timer.Start();
 	transpose_parallel_per_element_tiled16<<<blocks16x16,threads16x16>>>(d_in, d_out);

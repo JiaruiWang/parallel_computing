@@ -651,10 +651,14 @@ void your_sort(unsigned int* const d_inputVals,
   checkCudaErrors(cudaMalloc(&d_digits_ab_pos, sizeof(unsigned int) * numElems));
   unsigned int* d_blelloch_inter;
   checkCudaErrors(cudaMalloc(&d_blelloch_inter, sizeof(unsigned int) * blocks));
+  unsigned int* d_blelloch_2_inter;
+  checkCudaErrors(cudaMalloc(&d_blelloch_2_inter, sizeof(unsigned int) * 10));
+  unsigned int* d_inter_pos;
+  checkCudaErrors(cudaMalloc(&d_inter_pos, sizeof(unsigned int) * 10000));
 
   unsigned int one = 1;
   unsigned int thirtyTwo = (unsigned int)sizeof(unsigned int) * 8;
-  for (unsigned int i = 0; i < thirtyTwo; ++i)
+  for (unsigned int i = 0; i < 10; ++i)
   {
     // 1)
     // printf("%u, one << i = %u, sizeof(unsigned int) * 8 = %u\n", i, one << i,(unsigned int)sizeof(unsigned int) * 8);
@@ -677,11 +681,17 @@ void your_sort(unsigned int* const d_inputVals,
     // 3)
     checkCudaErrors(cudaMemcpy(d_digits_1_pos, d_digits, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToDevice));
     checkCudaErrors(cudaMemset(d_blelloch_inter, 0, sizeof(unsigned int) * blocks));
+    checkCudaErrors(cudaMemset(d_blelloch_2_inter, 0, sizeof(unsigned int) * 10));
+    checkCudaErrors(cudaMemset(d_inter_pos, 0, sizeof(unsigned int) * 10000));
     block_exclusive_scan_kernel<<<blocks, threads, sizeof(unsigned int) * 1024>>>(d_digits, d_digits_1_pos, d_blelloch_inter, numElems);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    self_exclusive_scan_kernel<<<1, threads, sizeof(unsigned int) * 1024>>>(d_blelloch_inter, 216);
+    block_exclusive_scan_kernel<<<10, 1000, sizeof(unsigned int) * 1024>>>(d_blelloch_inter, d_inter_pos, d_blelloch_2_inter, 10000);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    add_inter_kernel<<<blocks, threads>>>(d_blelloch_inter, d_digits_1_pos, numElems);
+    self_exclusive_scan_kernel<<<1, threads, sizeof(unsigned int) * 1024>>>(d_blelloch_2_inter, 10);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    add_inter_kernel<<<10, 1000>>>(d_blelloch_2_inter, d_inter_pos, 10000);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    add_inter_kernel<<<blocks, threads>>>(d_inter_pos, d_digits_1_pos, numElems);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
     // unsigned int* h_blelloch_inter = (unsigned int*)malloc(sizeof(unsigned int) * blocks);
     // checkCudaErrors(cudaMemcpy(h_blelloch_inter, d_blelloch_inter, sizeof(unsigned int) * blocks, cudaMemcpyDeviceToHost));
@@ -699,11 +709,18 @@ void your_sort(unsigned int* const d_inputVals,
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
     // exclusive_scan_kernel<<<blocks, threads>>>(d_digits_reverse, d_digits_0_pos, numElems);
     checkCudaErrors(cudaMemset(d_blelloch_inter, 0, sizeof(unsigned int) * blocks));
+    checkCudaErrors(cudaMemset(d_blelloch_2_inter, 0, sizeof(unsigned int) * 10));
+    checkCudaErrors(cudaMemset(d_inter_pos, 0, sizeof(unsigned int) * 10000));    
+
     block_exclusive_scan_kernel<<<blocks, threads, sizeof(unsigned int) * 1024>>>(d_digits_reverse, d_digits_0_pos, d_blelloch_inter, numElems);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    self_exclusive_scan_kernel<<<1, threads, sizeof(unsigned int) * 1024>>>(d_blelloch_inter, 216);
+    block_exclusive_scan_kernel<<<10, 1000, sizeof(unsigned int) * 1024>>>(d_blelloch_inter, d_inter_pos, d_blelloch_2_inter, 10000);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
-    add_inter_kernel<<<blocks, threads>>>(d_blelloch_inter, d_digits_0_pos, numElems);
+    self_exclusive_scan_kernel<<<1, threads, sizeof(unsigned int) * 1024>>>(d_blelloch_2_inter, 10);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    add_inter_kernel<<<10, 1000>>>(d_blelloch_2_inter, d_inter_pos, 10000);
+    cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
+    add_inter_kernel<<<blocks, threads>>>(d_inter_pos, d_digits_0_pos, numElems);
     cudaDeviceSynchronize(); checkCudaErrors(cudaGetLastError());
 
 
@@ -780,4 +797,13 @@ void computeHistogram(const unsigned int* const d_vals, //INPUT
   checkCudaErrors(cudaMemset(d_outputPos, 0, sizeof(unsigned int) * numElems));
 
   your_sort(d_inputVals, d_inputPos, d_outputVals, d_outputPos, numElems);
+
+  unsigned int* h_outputVals = (unsigned int*)malloc(sizeof(unsigned int) * numElems);
+  checkCudaErrors(cudaMemcpy(h_outputVals, d_outputVals, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToHost));
+  unsigned int* h_outputPos = (unsigned int*)malloc(sizeof(unsigned int) * numElems);
+  checkCudaErrors(cudaMemcpy(h_outputPos, d_outputPos, sizeof(unsigned int) * numElems, cudaMemcpyDeviceToHost));
+  for (int i = 0; i < numElems; ++i)
+  {
+    printf("%d : pos[%u] : v(%u)\n", i, h_outputPos[i], h_outputVals[i]);
+  }
 }
